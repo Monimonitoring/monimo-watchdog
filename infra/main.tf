@@ -22,7 +22,7 @@ resource "aws_iam_role" "lambda" {
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
-# 파수꾼은 AWS 자원을 읽지 않는다. 로그 쓰기 말고는 권한이 없다
+# Watchdog 은 AWS 자원을 읽지 않는다. 로그 쓰기 말고는 권한이 없다
 resource "aws_iam_role_policy_attachment" "lambda_logs" {
   role       = aws_iam_role.lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"

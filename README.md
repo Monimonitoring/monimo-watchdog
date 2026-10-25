@@ -1,6 +1,6 @@
 # monimo-watchdog
 
-파수꾼: 우리 스택 바깥에서 카나리 데이터로 파이프라인이 살아 있는지 확인하는 Lambda
+Watchdog: 우리 스택 바깥에서 카나리 데이터로 파이프라인이 살아 있는지 확인하는 Lambda
 
 - 기술: Python · Terraform · AWS Lambda · EventBridge Scheduler
 - 상태: 카나리 한 주기 + 배포 정의 완료. **일정은 꺼 둔 상태**
@@ -22,14 +22,14 @@
 1. `traceparent`(`00-<32hex>-<16hex>-01`) + `tracestate: monimon=canary` 를 붙여 쇼핑몰 주문 API 에 가짜 주문 1건
 2. 바로 `GET /api/v1/internal/canary/freshness?service_name=shop-order` (`X-Internal-Token`)
 3. `fresh` 가 false 면 전용 Slack 웹훅
-4. `GET /api/v1/internal/self-check` (`X-Internal-Token`, backend #226) — PG 두드림 · 탐지 · 수집기 낡음 게이지. `ok` 가 false 인 항목마다 Slack 한 줄 (한 메시지)
+4. `GET /api/v1/internal/self-check` (`X-Internal-Token`, backend #226) — PG 두드림 · Detector · Collector 낡음 게이지. `ok` 가 false 인 항목마다 Slack 한 줄 (한 메시지)
 5. 무엇으로 끝났든 Healthchecks.io 핑
 
-**자기 점검은 카나리와 따로 본다.** 카나리는 "신호가 끝까지 흐르나", 자기 점검은 "PG · 탐지 · 수집기가 멈췄나" 다. backend #208 ⑥ 실측에서 PG 를 멈추자 탐지 · 알림이 PG 에 막혀 경보가 0건이었고, probe · 카나리도 PG 를 안 봐서 밖에서 보는 눈이 파수꾼뿐이었다. 결과의 `self_check` 는 `OK` · `PROBLEM` · `UNREACHABLE`.
+**자기 점검은 카나리와 따로 본다.** 카나리는 "신호가 끝까지 흐르나", 자기 점검은 "PG · Detector · Collector 가 멈췄나" 다. backend #208 ⑥ 실측에서 PG 를 멈추자 Detector · Notifier 가 PG 에 막혀 경보가 0건이었고, probe · 카나리도 PG 를 안 봐서 밖에서 보는 눈이 Watchdog 뿐이었다. 결과의 `self_check` 는 `OK` · `PROBLEM` · `UNREACHABLE`.
 
 **기다리지 않는다.** 2번에서 보이는 것은 방금 쏜 카나리가 아니라 직전 주기(60초 전)에 쏜 것이다. 내 것이 도착할 때까지 기다리면 Lambda 가 30~60초를 붙잡고 있어야 해서 1분 주기에 상주 서버와 다를 게 없어진다.
 
-**판정하지 않는다.** `fresh` 는 API 서버가 낸다. 기준값(`MONIMO_CANARY_THRESHOLD_SEC`, 180초)을 조일 때 파수꾼을 다시 배포하지 않으려고.
+**판정하지 않는다.** `fresh` 는 API server 가 낸다. 기준값(`MONIMO_CANARY_THRESHOLD_SEC`, 180초)을 조일 때 Watchdog 을 다시 배포하지 않으려고.
 
 ## 로컬 실행
 
@@ -50,10 +50,10 @@ PYTHONPATH=src python -c 'from handler import Config, run; print(run(Config.from
 | 이름 | 설명 |
 |---|---|
 | `SHOP_ORDER_URL` | 카나리가 호출할 쇼핑몰 주문 API. 게이트웨이(8090)를 거친다 (shop `#26`). 상품은 재고 표에 있는 `P-100` |
-| `API_SERVER_URL` | 카나리 신선도를 조회할 API 서버 |
+| `API_SERVER_URL` | 카나리 신선도를 조회할 API server |
 | `PING_URL` | Healthchecks.io 핑 주소 (Dead Man's Switch) |
-| `MONIMO_INTERNAL_TOKEN` | 내부 문 출입증. API 서버의 같은 이름 값과 맞춘다 |
-| `SLACK_WEBHOOK` | 파수꾼 전용 슬랙 웹훅 (관제 스택과 별도 채널) |
+| `MONIMO_INTERNAL_TOKEN` | 내부 문 출입증. API server 의 같은 이름 값과 맞춘다 |
+| `SLACK_WEBHOOK` | Watchdog 전용 슬랙 웹훅 (관제 스택과 별도 채널) |
 
 운영(Lambda)에서는 `infra/` 의 Terraform 이 같은 이름으로 넣는다.
 
@@ -80,7 +80,7 @@ Terraform 에 기본값을 두지 않았다. 아래가 정해져야 `terraform p
 |---|---|
 | `terraform init -backend-config` | state 를 둘 S3 버킷 · 키 · 리전 |
 | `terraform.tfvars` | `aws_region`(서울 `ap-northeast-2`, 스택과 같은 리전 · backend ADR `#62`) · `shop_order_url` · `api_server_url` |
-| `terraform.tfvars` 또는 `TF_VAR_*` | `monimo_internal_token`(API 서버와 같은 값) · `slack_webhook` · `ping_url` |
+| `terraform.tfvars` 또는 `TF_VAR_*` | `monimo_internal_token`(API server 와 같은 값) · `slack_webhook` · `ping_url` |
 | 레포 Secret `AWS_DEPLOY_ROLE_ARN` | GitHub OIDC 를 신뢰하는 배포 역할 |
 | 레포 Variable `AWS_REGION` · `LAMBDA_FUNCTION_NAME` | `terraform output` 으로 나온다. **이 둘이 비어 있으면 `deploy.yml` 이 통째로 건너뛴다** |
 
@@ -99,4 +99,4 @@ Terraform 에 기본값을 두지 않았다. 아래가 정해져야 `terraform p
 
 ## AI 와 일한 방법 (승조가 맡은 부분)
 
-파수꾼 담당은 재범(`@jaebeom79`)이다. 승조(`@SeungJo-02`)가 맡은 초기 구성 · PR 라벨 · CODEOWNERS · develop 전략 · `AGENTS.md`(`#1` `#2` `#3` `#9` `#12`)는 AI(Claude Code)와 함께 만들었다. 절차 · 역할 분담 · 토큰 기준값 · AI 가 틀린 것과 잡은 방법은 `monimo-backend` 의 [`docs/seungjo/harness.md`](https://github.com/2026-techeer-project-team-b/monimo-backend/blob/HEAD/docs/seungjo/harness.md)(정본), 이 레포에서 무엇을 어떻게 물었는지는 [`docs/prompts/`](docs/prompts/README.md) 에 있다. 재범의 작업 방식은 여기서 말하지 않는다.
+Watchdog 담당은 재범(`@jaebeom79`)이다. 승조(`@SeungJo-02`)가 맡은 초기 구성 · PR 라벨 · CODEOWNERS · develop 전략 · `AGENTS.md`(`#1` `#2` `#3` `#9` `#12`)는 AI(Claude Code)와 함께 만들었다. 절차 · 역할 분담 · 토큰 기준값 · AI 가 틀린 것과 잡은 방법은 `monimo-backend` 의 [`docs/seungjo/harness.md`](https://github.com/2026-techeer-project-team-b/monimo-backend/blob/HEAD/docs/seungjo/harness.md)(정본), 이 레포에서 무엇을 어떻게 물었는지는 [`docs/prompts/`](docs/prompts/README.md) 에 있다. 재범의 작업 방식은 여기서 말하지 않는다.
