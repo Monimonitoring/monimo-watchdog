@@ -1,7 +1,7 @@
 # 계정 · 리전 · 주소 · 비밀값에는 기본값을 두지 않는다. 잘못된 곳에 조용히 올라가지 않도록
 
 variable "aws_region" {
-  description = "파수꾼을 올릴 리전. 스택과 같은 서울(ap-northeast-2) 권장 — 계정 · 결제 문제는 리전이 달라도 같이 겪는다"
+  description = "Watchdog 을 올릴 리전. 스택과 같은 서울(ap-northeast-2) 권장 — 계정 · 결제 문제는 리전이 달라도 같이 겪는다"
   type        = string
 }
 
@@ -44,18 +44,18 @@ variable "shop_order_url" {
 }
 
 variable "api_server_url" {
-  description = "카나리 신선도를 조회할 API 서버"
+  description = "카나리 신선도를 조회할 API server"
   type        = string
 }
 
 variable "monimo_internal_token" {
-  description = "내부 문 출입증. API 서버의 같은 이름 값과 맞춘다"
+  description = "내부 문 출입증. API server 의 같은 이름 값과 맞춘다"
   type        = string
   sensitive   = true
 }
 
 variable "slack_webhook" {
-  description = "파수꾼 전용 슬랙 웹훅. 관제 스택(notifier)과 다른 채널"
+  description = "Watchdog 전용 슬랙 웹훅. 관제 스택(notifier)과 다른 채널"
   type        = string
   sensitive   = true
 }

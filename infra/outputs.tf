@@ -4,6 +4,6 @@ output "function_name" {
 }
 
 output "schedule_state" {
-  description = "DISABLED 면 파수꾼이 깨어나지 않는다"
+  description = "DISABLED 면 Watchdog 이 깨어나지 않는다"
   value       = aws_scheduler_schedule.cycle.state
 }

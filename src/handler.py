@@ -108,25 +108,25 @@ def _quietly(what: str, call, *args) -> None:
         log.exception("%s 실패", what)
 
 
-_ORDER_FAILED = ":rotating_light: 파수꾼 — 쇼핑몰 주문 API 에 카나리를 넣지 못했습니다. 신선도 조회는 건너뛰었습니다"
-_FRESHNESS_UNREACHABLE = ":rotating_light: 파수꾼 — API 서버 신선도 조회에 실패했습니다. 파이프라인이 아니라 API 서버 쪽일 수 있습니다"
-_SELF_CHECK_UNREACHABLE = ":rotating_light: 파수꾼 — API 서버 자기 점검 조회에 실패했습니다. API 서버가 죽었거나 내부 문이 막혔습니다"
-_SELF_CHECK_PROBLEM = ":rotating_light: 파수꾼 — 자기 점검에서 멈춘 것이 있습니다"
+_ORDER_FAILED = ":rotating_light: Watchdog — 쇼핑몰 주문 API 에 카나리를 넣지 못했습니다. 신선도 조회는 건너뛰었습니다"
+_FRESHNESS_UNREACHABLE = ":rotating_light: Watchdog — API server 신선도 조회에 실패했습니다. 파이프라인이 아니라 API server 쪽일 수 있습니다"
+_SELF_CHECK_UNREACHABLE = ":rotating_light: Watchdog — API server 자기 점검 조회에 실패했습니다. API server 가 죽었거나 내부 문이 막혔습니다"
+_SELF_CHECK_PROBLEM = ":rotating_light: Watchdog — 자기 점검에서 멈춘 것이 있습니다"
 
 
 def _stale_text(freshness: dict) -> str:
     """카나리가 한 건도 없으면 last_signal_at · age_sec 이 null 로 온다 (backend #160). 그때는 시각을 적지 않는다"""
     threshold = freshness.get("threshold_sec")
     if freshness.get("age_sec") is None:
-        return f":rotating_light: 파수꾼 — 카나리가 끊겼습니다 (마지막 신호 없음 / 기준 {threshold}초)"
+        return f":rotating_light: Watchdog — 카나리가 끊겼습니다 (마지막 신호 없음 / 기준 {threshold}초)"
     return (
-        ":rotating_light: 파수꾼 — 카나리가 끊겼습니다 "
+        ":rotating_light: Watchdog — 카나리가 끊겼습니다 "
         f"(마지막 신호 {freshness['last_signal_at']}, {freshness['age_sec']}초 전 / 기준 {threshold}초)"
     )
 
 
 # 항목 이름 · 무엇이 멈춘 것인지. Detector 가 멈추면 경보가 안 나고, Collector 비율 갱신이 멈추면 샘플링이 낡은 값으로 돈다
-_AGE_ITEMS = (("detector", "탐지 평가"), ("collector", "수집기 비율 갱신"))
+_AGE_ITEMS = (("detector", "Detector 평가"), ("collector", "Collector 비율 갱신"))
 
 
 def _problem_lines(data: dict) -> list:
