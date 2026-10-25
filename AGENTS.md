@@ -9,14 +9,14 @@
 
 | 무엇 | 정본 |
 |---|---|
-| 설계 결정(ADR) — 파수꾼은 `#01` `#13` `#18` `#41` | `monimo-backend` 레포 `docs/design/01-decisions.md` |
+| 설계 결정(ADR) — Watchdog 은 `#01` `#13` `#18` `#41` | `monimo-backend` 레포 `docs/design/01-decisions.md` |
 | 한 주기 · 로컬 실행 · 환경변수 · 배포 | 이 레포 `README.md` |
 | 카나리 조회 문 명세 (`GET /api/v1/internal/canary/freshness`) | `monimo-backend` 레포 `docs/design/web-v2/api-spec.md` (사본) · 노션 「API 명세」(정본) |
 | 카나리 표식이 저장되는 자리 | `monimo-backend` `AGENTS.md` §6 — CH `spans.attributes['monimo.canary']` |
 
 ## 1. 레포 한눈에
 
-**파수꾼.** 우리 관제 스택 *바깥*(AWS Lambda)에서 1분마다 쇼핑몰에 카나리 주문 1건을 넣고, 그 신호가 에이전트 → 수집기 → Kafka → 적재 처리기 → ClickHouse → API 서버를 실제로 관통했는지 묻는다. 스택이 통째로 죽어도 알림이 가야 하므로 스택 안에 두지 않는다 (ADR `#01` `#13`).
+**Watchdog.** 우리 관제 스택 *바깥*(AWS Lambda)에서 1분마다 쇼핑몰에 카나리 주문 1건을 넣고, 그 신호가 에이전트 → Collector → Kafka → Ingester → ClickHouse → API server 를 실제로 끝까지 지나갔는지 묻는다. 스택이 통째로 죽어도 알림이 가야 하므로 스택 안에 두지 않는다 (ADR `#01` `#13`).
 
 Python 3.13 · 표준 라이브러리만 · Terraform · AWS Lambda · EventBridge Scheduler. 배포는 `src/` 를 zip 으로 묶어 올리는 것이 전부다.
 
@@ -32,9 +32,9 @@ Python 3.13 · 표준 라이브러리만 · Terraform · AWS Lambda · EventBrid
 ## 2. 깨면 안 되는 규칙
 
 - **표준 라이브러리만 쓴다.** `requirements-dev.txt` 는 테스트용이다. 의존성을 넣으면 zip 배포가 깨지고 Lambda 레이어가 필요해진다.
-- **판정하지 않는다.** `fresh` 는 API 서버가 낸다. 기준값(`MONIMO_CANARY_THRESHOLD_SEC`)은 API 서버 쪽 설정이다. 파수꾼에 판정 로직을 넣으면 기준을 조일 때마다 Lambda 를 다시 배포해야 한다.
+- **판정하지 않는다.** `fresh` 는 API server 가 낸다. 기준값(`MONIMO_CANARY_THRESHOLD_SEC`)은 API server 쪽 설정이다. Watchdog 에 판정 로직을 넣으면 기준을 조일 때마다 Lambda 를 다시 배포해야 한다.
 - **기다리지 않는다.** 조회에서 보이는 것은 직전 주기(60초 전)의 카나리다. 내 것이 도착하기를 기다리면 Lambda 가 30~60초를 붙잡아 상주 서버와 다를 게 없어진다.
-- **`tracestate` 는 `traceparent` 와 짝으로만 보낸다.** 혼자 보내면 버려진다. 값 `monimon=canary` 는 수집기 샘플링 예외(backend `#46`)와 적재 표식(backend `#58`, ADR `#41`)이 그대로 읽는 약속이다. 바꾸면 카나리가 1% 샘플링에 걸려 사라진다.
+- **`tracestate` 는 `traceparent` 와 짝으로만 보낸다.** 혼자 보내면 버려진다. 값 `monimon=canary` 는 Collector 샘플링 예외(backend `#46`)와 적재 표식(backend `#58`, ADR `#41`)이 그대로 읽는 약속이다. 바꾸면 카나리가 1% 샘플링에 걸려 사라진다.
 - **테스트는 네트워크를 타지 않는다.** CI 가 AWS 에도 쇼핑몰에도 닿지 않는다.
 - **인프라는 Terraform 으로만 바꾼다.** 일정 · IAM · 환경변수를 콘솔에서 고치면 다음 `apply` 가 되돌린다. `deploy.yml` 은 코드(zip)만 교체한다.
 - **비밀값은 레포에 올리지 않는다.** `.env.example` · `terraform.tfvars.example` 에 이름만 둔다. AWS 는 영구 키가 아니라 GitHub Actions OIDC 로 역할을 빌린다. 레포는 퍼블릭이다.
@@ -65,18 +65,19 @@ CI 는 **test**(pytest) 와 **terraform**(`fmt -check` · `init -backend=false` 
 - **`#9`** develop 브랜치 전략 — 워크플로 트리거 `[main, develop]`, 기여 규칙
 - **`#12`** `AGENTS.md` · `CLAUDE.md`, README 「AI 와 일한 방법」 절(승조가 맡은 부분만), `docs/prompts/`. 하네스 정본은 backend `docs/seungjo/harness.md` 한 곳
 - **`#13`** 카나리 주문을 게이트웨이(8090) · 재고 있는 상품 `P-100` 으로, 리전 서울 권장 (`#14`). 카나리가 한 건도 없을 때 문구의 `None초 전` 제거 (`#15` · `#16`)
-- **`#20`** 한 주기에 **자기 점검** 단계 — 카나리 뒤에 `GET /api/v1/internal/self-check`(backend `#226`)를 불러 PG 두드림 · 탐지 · 수집기 낡음 게이지(ADR `#54`) 중 `ok=false` 인 항목마다 Slack 한 줄(한 메시지). 카나리 결과와 따로 본다 : backend `#208` ⑥ 실측에서 PG 를 멈추자 탐지 · 알림이 PG 에 막혀 경보 0건이었고 probe · 카나리도 PG 를 안 봐서, 밖(Lambda)에 있는 파수꾼이 그 눈이 됐다. 조회가 터지면 `UNREACHABLE` 로 따로 알린다
+- **`#20`** 한 주기에 **자기 점검** 단계 — 카나리 뒤에 `GET /api/v1/internal/self-check`(backend `#226`)를 불러 PG 두드림 · Detector · Collector 낡음 게이지(ADR `#54`) 중 `ok=false` 인 항목마다 Slack 한 줄(한 메시지). 카나리 결과와 따로 본다 : backend `#208` ⑥ 실측에서 PG 를 멈추자 Detector · Notifier 가 PG 에 막혀 경보 0건이었고 probe · 카나리도 PG 를 안 봐서, 밖(Lambda)에 있는 Watchdog 이 그 눈이 됐다. 조회가 터지면 `UNREACHABLE` 로 따로 알린다
+- 2026-10-26 문서 · 주석의 우리말 조어를 현업 이름으로 바꿨다 (backend `#240` · ADR `#73`). 코드 안 문자열(화면 문구 · Slack 경보 · 테스트 이름)은 backend `#241`
 
 ## 6. 지금 막혀 있는 것
 
 | 무엇 | 누가 풀어야 하나 | 안 풀면 |
 |---|---|---|
-| 카나리 조회 문 `GET /api/v1/internal/canary/freshness` 가 API 서버에 없다 | 조회 파트 (Nova) | **일정을 켤 수 없다.** 켜면 1분마다 오탐 Slack 이 하루 1,440번. 적재는 표식을 `attributes['monimo.canary']` 로 남기고 있으니(backend `#58`) 조회 문은 `mapContains(attributes, 'monimo.canary')` 기준으로 만들면 된다. 명세의 `service_name=canary-probe` 기준은 0건이 나온다(backend `AGENTS.md` §6) |
-| 배포 변수가 비어 있다 — 레포 Secret `AWS_DEPLOY_ROLE_ARN`, Variable `AWS_REGION` · `LAMBDA_FUNCTION_NAME`, `terraform.tfvars`, backend 버킷 | 배포 (승조) + 파수꾼 (재범) | `terraform plan` 이 돌지 않고 `deploy.yml` 이 건너뛴다. AWS 계정이 정해져야 한다 |
-| 명세는 "서비스 6개가 `/readyz` 를 연다" 고 적는데 파수꾼은 Lambda 라 상주 문이 없다 | 팀 결정 (backend `02-open-questions.md`) | 화면 S10 「우리 서비스 6개」카드에서 파수꾼 줄을 어떻게 채울지 정해야 한다. Healthchecks.io 핑 상태를 대신 보여 주는 것이 한 방법 |
-| 카나리 주문이 쇼핑몰 MySQL 에 실제 줄로 남는다 | 쇼핑몰 (승조) · 파수꾼 (재범) | 하루 1,440건. 지금은 로컬이라 문제 없지만 배포 뒤에는 `productId = canary` 를 주기적으로 지우거나 쇼핑몰이 카나리 주문을 저장하지 않게 해야 한다 |
+| 카나리 조회 문 `GET /api/v1/internal/canary/freshness` 가 API server 에 없다 | 조회 파트 (Nova) | **일정을 켤 수 없다.** 켜면 1분마다 오탐 Slack 이 하루 1,440번. 적재는 표식을 `attributes['monimo.canary']` 로 남기고 있으니(backend `#58`) 조회 문은 `mapContains(attributes, 'monimo.canary')` 기준으로 만들면 된다. 명세의 `service_name=canary-probe` 기준은 0건이 나온다(backend `AGENTS.md` §6) |
+| 배포 변수가 비어 있다 — 레포 Secret `AWS_DEPLOY_ROLE_ARN`, Variable `AWS_REGION` · `LAMBDA_FUNCTION_NAME`, `terraform.tfvars`, backend 버킷 | 배포 (승조) + Watchdog (재범) | `terraform plan` 이 돌지 않고 `deploy.yml` 이 건너뛴다. AWS 계정이 정해져야 한다 |
+| 명세는 "서비스 6개가 `/readyz` 를 연다" 고 적는데 Watchdog 은 Lambda 라 상주 문이 없다 | 팀 결정 (backend `02-open-questions.md`) | 화면 S10 「우리 서비스 6개」카드에서 Watchdog 줄을 어떻게 채울지 정해야 한다. Healthchecks.io 핑 상태를 대신 보여 주는 것이 한 방법 |
+| 카나리 주문이 쇼핑몰 MySQL 에 실제 줄로 남는다 | 쇼핑몰 (승조) · Watchdog (재범) | 하루 1,440건. 지금은 로컬이라 문제 없지만 배포 뒤에는 `productId = canary` 를 주기적으로 지우거나 쇼핑몰이 카나리 주문을 저장하지 않게 해야 한다 |
 
 ## 7. 참고
 
 - 설계 문서: https://github.com/2026-techeer-project-team-b/monimo-backend/tree/HEAD/docs/design
-- 수집기 → ClickHouse 가 이어져 있는지 로컬에서 보려면 `monimo-backend` 의 `scripts/check-pipeline.sh`
+- Collector → ClickHouse 가 이어져 있는지 로컬에서 보려면 `monimo-backend` 의 `scripts/check-pipeline.sh`

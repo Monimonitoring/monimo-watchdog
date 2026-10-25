@@ -1,4 +1,4 @@
-"""파수꾼이 바깥으로 내보내는 신호 둘 — 사람에게 가는 Slack, 기계에게 가는 Healthchecks.io 핑."""
+"""Watchdog 이 바깥으로 내보내는 신호 둘 — 사람에게 가는 Slack, 기계에게 가는 Healthchecks.io 핑."""
 
 import json
 import urllib.request

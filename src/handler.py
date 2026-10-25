@@ -48,11 +48,11 @@ def run(
     """결과를 돌려주되 던지지 않는다. 한 주기가 실패해도 다음 주기는 그대로 돈다."""
     try:
         result = _canary(config, send_order, fetch_freshness, post_slack)
-        # 카나리가 어떻게 끝났든 자기 점검은 따로 본다. 둘은 서로 다른 것을 잡는다 (파이프라인 vs PG · 탐지 · 수집기)
+        # 카나리가 어떻게 끝났든 자기 점검은 따로 본다. 둘은 서로 다른 것을 잡는다 (파이프라인 vs PG · Detector · Collector)
         result["self_check"] = _self_check(config, fetch_self_check, post_slack)
         return result
     finally:
-        # 판정이 어떻게 끝났든 보낸다. 안 보내면 Healthchecks 가 파수꾼이 죽은 것으로 본다
+        # 판정이 어떻게 끝났든 보낸다. 안 보내면 Healthchecks 가 Watchdog 이 죽은 것으로 본다
         _quietly("Healthchecks 핑", ping, config.ping_url)
 
 
@@ -83,7 +83,7 @@ def _canary(config, send_order, fetch_freshness, post_slack) -> dict:
 
 
 def _self_check(config, fetch_self_check, post_slack) -> str:
-    """PG · 탐지 · 수집기가 멈췄는지 (backend #226). 탐지가 PG 에 막히면 경보 체계 전체가 조용해지므로 밖에서 본다"""
+    """PG · Detector · Collector 가 멈췄는지 (backend #226). Detector 가 PG 에 막히면 경보 체계 전체가 조용해지므로 밖에서 본다"""
     try:
         data = fetch_self_check(config.api_server_url, config.internal_token)
     except Exception:
@@ -125,7 +125,7 @@ def _stale_text(freshness: dict) -> str:
     )
 
 
-# 항목 이름 · 무엇이 멈춘 것인지. 탐지가 멈추면 경보가 안 나고, 수집기 비율 갱신이 멈추면 샘플링이 낡은 값으로 돈다
+# 항목 이름 · 무엇이 멈춘 것인지. Detector 가 멈추면 경보가 안 나고, Collector 비율 갱신이 멈추면 샘플링이 낡은 값으로 돈다
 _AGE_ITEMS = (("detector", "탐지 평가"), ("collector", "수집기 비율 갱신"))
 
 

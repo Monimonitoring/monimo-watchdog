@@ -1,4 +1,4 @@
-# main 에 올라간 파수꾼 코드를 Lambda 에 반영한다.
+# main 에 올라간 Watchdog 코드를 Lambda 에 반영한다.
 # 영구 액세스 키를 레포에 두지 않으려고 OIDC 로 역할을 빌린다 (ADR #18).
 name: deploy
 
