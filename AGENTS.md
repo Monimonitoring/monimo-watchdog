@@ -66,6 +66,7 @@ CI 는 **test**(pytest) 와 **terraform**(`fmt -check` · `init -backend=false` 
 - **`#12`** `AGENTS.md` · `CLAUDE.md`, README 「AI 와 일한 방법」 절(승조가 맡은 부분만), `docs/prompts/`. 하네스 정본은 backend `docs/seungjo/harness.md` 한 곳
 - **`#13`** 카나리 주문을 게이트웨이(8090) · 재고 있는 상품 `P-100` 으로, 리전 서울 권장 (`#14`). 카나리가 한 건도 없을 때 문구의 `None초 전` 제거 (`#15` · `#16`)
 - **`#20`** 한 주기에 **자기 점검** 단계 — 카나리 뒤에 `GET /api/v1/internal/self-check`(backend `#226`)를 불러 PG 두드림 · Detector · Collector 낡음 게이지(ADR `#54`) 중 `ok=false` 인 항목마다 Slack 한 줄(한 메시지). 카나리 결과와 따로 본다 : backend `#208` ⑥ 실측에서 PG 를 멈추자 Detector · Notifier 가 PG 에 막혀 경보 0건이었고 probe · 카나리도 PG 를 안 봐서, 밖(Lambda)에 있는 Watchdog 이 그 눈이 됐다. 조회가 터지면 `UNREACHABLE` 로 따로 알린다
+- 2026-10-26 문서 · 주석의 우리말 조어를 현업 이름으로 바꿨다 (backend `#240` · ADR `#73`). 코드 안 문자열(화면 문구 · Slack 경보 · 테스트 이름)은 backend `#241`
 
 ## 6. 지금 막혀 있는 것
 
