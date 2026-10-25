@@ -105,7 +105,7 @@ def test_PG_만_멈추면_그_한_줄만_slack_에_간다():
     assert result == {"result": "FRESH", "self_check": "PROBLEM"}
     text = slack.calls[0][1]
     assert "PostgreSQL 응답 없음 (5003ms, timeout)" in text
-    assert "탐지" not in text and "수집기" not in text
+    assert "Detector" not in text and "Collector" not in text
 
 
 def test_셋_다_멈추면_세_줄이_한_메시지로_간다():
@@ -121,8 +121,8 @@ def test_셋_다_멈추면_세_줄이_한_메시지로_간다():
     assert len(slack.calls) == 1
     text = slack.calls[0][1]
     assert "PostgreSQL 응답 없음" in text
-    assert "탐지 평가 멈춤 — 251초째 (기준 180초)" in text
-    assert "수집기 비율 갱신 게이지를 못 읽음 (unreachable)" in text
+    assert "Detector 평가 멈춤 — 251초째 (기준 180초)" in text
+    assert "Collector 비율 갱신 게이지를 못 읽음 (unreachable)" in text
     assert "None" not in text.replace("(unreachable)", "")
 
 
