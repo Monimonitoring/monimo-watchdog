@@ -33,3 +33,4 @@ crash.log
 
 # 로컬 AI 도구 작업 기록 (레포에 올리지 않는다)
 .omc/
+.watchdog-state.json
