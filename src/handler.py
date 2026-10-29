@@ -48,7 +48,7 @@ def run(
     """결과를 돌려주되 던지지 않는다. 한 주기가 실패해도 다음 주기는 그대로 돈다."""
     try:
         result = _canary(config, send_order, fetch_freshness, post_slack)
-        # 카나리가 어떻게 끝났든 자기 점검은 따로 본다. 둘은 서로 다른 것을 잡는다 (파이프라인 vs PG · Detector · Collector)
+        # 카나리가 어떻게 끝났든 자기 점검은 따로 본다. 둘은 서로 다른 것을 잡는다 (파이프라인 vs PG · Detector · Collector · Notifier)
         result["self_check"] = _self_check(config, fetch_self_check, post_slack)
         return result
     finally:
@@ -83,7 +83,8 @@ def _canary(config, send_order, fetch_freshness, post_slack) -> dict:
 
 
 def _self_check(config, fetch_self_check, post_slack) -> str:
-    """PG · Detector · Collector 가 멈췄는지 (backend #226). Detector 가 PG 에 막히면 경보 체계 전체가 조용해지므로 밖에서 본다"""
+    """PG · Detector · Collector · Notifier 가 멈췄는지, 발송 큐가 쌓이는지 (backend #226 · #267).
+    Detector 가 PG 에 막히면 경보 체계 전체가 조용해지고, Notifier 가 죽으면 그 사실을 알릴 것도 Notifier 라 밖에서 본다"""
     try:
         data = fetch_self_check(config.api_server_url, config.internal_token)
     except Exception:
@@ -125,8 +126,9 @@ def _stale_text(freshness: dict) -> str:
     )
 
 
-# 항목 이름 · 무엇이 멈춘 것인지. Detector 가 멈추면 경보가 안 나고, Collector 비율 갱신이 멈추면 샘플링이 낡은 값으로 돈다
-_AGE_ITEMS = (("detector", "Detector 평가"), ("collector", "Collector 비율 갱신"))
+# 항목 이름 · 무엇이 멈춘 것인지. Detector 가 멈추면 경보가 안 나고, Collector 비율 갱신이 멈추면 샘플링이 낡은 값으로 돌고,
+# Notifier 큐 읽기가 멈추면 경보가 만들어져도 나가지 않는다
+_AGE_ITEMS = (("detector", "Detector 평가"), ("collector", "Collector 비율 갱신"), ("notifier", "Notifier 큐 읽기"))
 
 
 def _problem_lines(data: dict) -> list:
@@ -136,6 +138,9 @@ def _problem_lines(data: dict) -> list:
     if not pg.get("ok"):
         lines.append(f"• PostgreSQL 응답 없음 ({pg.get('ms')}ms, {pg.get('error')})")
     for key, name in _AGE_ITEMS:
+        # 응답에 없는 항목은 건너뛴다 : API server 가 아직 그 항목을 안 주는 판(backend 머지 전)에서 "못 읽음" 으로 울리지 않게
+        if key not in data:
+            continue
         item = data.get(key) or {}
         if item.get("ok"):
             continue
@@ -143,10 +148,29 @@ def _problem_lines(data: dict) -> list:
             lines.append(f"• {name} 게이지를 못 읽음 ({item.get('error')})")
         else:
             lines.append(f"• {name} 멈춤 — {round(item['age_sec'])}초째 (기준 {item.get('max_sec')}초)")
+    lines.extend(_outbox_lines(data))
     return lines
+
+
+def _outbox_lines(data: dict) -> list:
+    """발송 큐 적체 (backend #267). Notifier 게이지가 작아도 Slack 웹훅이 틀리거나 서킷이 열리면 여기만 커진다"""
+    if "outbox" not in data:
+        return []
+    item = data.get("outbox") or {}
+    if item.get("ok"):
+        return []
+    if item.get("error"):
+        return [f"• 발송 큐를 못 봄 ({item.get('error')})"]
+    failed = f"최근 실패 {item.get('failed_recent')}건"
+    oldest = item.get("oldest_pending_sec")
+    # 웹훅이 틀리면 줄이 재시도 한도에 닿아 FAILED 로 끝나므로 미발송이 없어도 온다. 그때는 실패 수만 적는다
+    if oldest is None:
+        return [f"• Slack 으로 안 나감 — {failed} (재시도 한도 도달)"]
+    return [f"• Slack 으로 안 나감 — 미발송 가장 오래된 것 {round(oldest)}초째 (기준 {item.get('max_sec')}초), {failed}"]
 
 
 def _summary(data: dict) -> str:
     pg = data.get("postgres") or {}
-    ages = " ".join(f"{key}_age={(data.get(key) or {}).get('age_sec')}" for key, _ in _AGE_ITEMS)
-    return f"pg_ms={pg.get('ms')} {ages}"
+    ages = " ".join(f"{key}_age={(data.get(key) or {}).get('age_sec')}" for key, _ in _AGE_ITEMS if key in data)
+    outbox = data.get("outbox") or {}
+    return f"pg_ms={pg.get('ms')} {ages} outbox_oldest={outbox.get('oldest_pending_sec')} outbox_failed={outbox.get('failed_recent')}"
