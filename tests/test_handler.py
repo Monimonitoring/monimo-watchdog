@@ -11,11 +11,13 @@ CONFIG = Config(
 STALE = {"last_signal_at": "2026-10-01T00:00:00Z", "age_sec": 900, "threshold_sec": 180, "fresh": False}
 FRESH = {"last_signal_at": "2026-10-01T00:00:00Z", "age_sec": 15, "threshold_sec": 180, "fresh": True}
 
-# 자기 점검 응답 (backend #226). 셋 다 ok
+# 자기 점검 응답 (backend #226 · #267). 다섯 다 ok
 ALL_OK = {
     "postgres": {"ok": True, "ms": 3, "error": None},
     "detector": {"ok": True, "age_sec": 11.2, "max_sec": 180, "error": None},
     "collector": {"ok": True, "age_sec": 8.0, "max_sec": 180, "error": None},
+    "notifier": {"ok": True, "age_sec": 2.5, "max_sec": 180, "error": None},
+    "outbox": {"ok": True, "oldest_pending_sec": None, "failed_recent": 0, "max_sec": 180, "error": None},
 }
 
 
@@ -134,3 +136,64 @@ def test_자기_점검_조회가_터지면_그것만_알리고_카나리_결과�
     assert result == {"result": "STALE", "self_check": "UNREACHABLE"}
     assert len(slack.calls) == 2
     assert "자기 점검 조회에 실패" in slack.calls[1][1]
+
+
+def test_Notifier_큐_읽기만_멈추면_그_한_줄만_간다():
+    slack = Spy()
+    stuck = dict(ALL_OK, notifier={"ok": False, "age_sec": 412.0, "max_sec": 180, "error": None})
+
+    result = run(CONFIG, send_order=Spy("tp"), fetch_freshness=Spy(FRESH), fetch_self_check=Spy(stuck), post_slack=slack, ping=Spy())
+
+    assert result == {"result": "FRESH", "self_check": "PROBLEM"}
+    text = slack.calls[0][1]
+    assert "Notifier 큐 읽기 멈춤 — 412초째 (기준 180초)" in text
+    assert "Slack 으로 안 나감" not in text
+
+
+def test_발송_큐가_쌓이면_Notifier_게이지가_작아도_안_나감_한_줄이_간다():
+    slack = Spy()
+    backlog = dict(ALL_OK, outbox={"ok": False, "oldest_pending_sec": 301, "failed_recent": 2, "max_sec": 180, "error": None})
+
+    result = run(CONFIG, send_order=Spy("tp"), fetch_freshness=Spy(FRESH), fetch_self_check=Spy(backlog), post_slack=slack, ping=Spy())
+
+    assert result == {"result": "FRESH", "self_check": "PROBLEM"}
+    text = slack.calls[0][1]
+    assert "Slack 으로 안 나감 — 미발송 가장 오래된 것 301초째 (기준 180초), 최근 실패 2건" in text
+    assert "Notifier 큐 읽기" not in text
+
+
+def test_발송_큐를_못_보면_error_를_적는다():
+    slack = Spy()
+    unreadable = dict(
+        ALL_OK,
+        postgres={"ok": False, "ms": 5002, "error": "timeout"},
+        outbox={"ok": False, "oldest_pending_sec": None, "failed_recent": 0, "max_sec": 180, "error": "timeout"},
+    )
+
+    run(CONFIG, send_order=Spy("tp"), fetch_freshness=Spy(FRESH), fetch_self_check=Spy(unreadable), post_slack=slack, ping=Spy())
+
+    text = slack.calls[0][1]
+    assert "PostgreSQL 응답 없음" in text
+    assert "발송 큐를 못 봄 (timeout)" in text
+    assert "None" not in text
+
+
+def test_응답에_notifier_outbox_가_없으면_옛_API_server_로_보고_건너뛴다():
+    slack = Spy()
+    old = {k: v for k, v in ALL_OK.items() if k in ("postgres", "detector", "collector")}
+
+    result = run(CONFIG, send_order=Spy("tp"), fetch_freshness=Spy(FRESH), fetch_self_check=Spy(old), post_slack=slack, ping=Spy())
+
+    assert result == {"result": "FRESH", "self_check": "OK"}
+    assert slack.calls == []
+
+
+def test_미발송은_없고_실패만_있으면_실패_수만_적는다():
+    slack = Spy()
+    failed_only = dict(ALL_OK, outbox={"ok": False, "oldest_pending_sec": None, "failed_recent": 1, "max_sec": 180, "error": None})
+
+    run(CONFIG, send_order=Spy("tp"), fetch_freshness=Spy(FRESH), fetch_self_check=Spy(failed_only), post_slack=slack, ping=Spy())
+
+    text = slack.calls[0][1]
+    assert "Slack 으로 안 나감 — 최근 실패 1건 (재시도 한도 도달)" in text
+    assert "None" not in text
