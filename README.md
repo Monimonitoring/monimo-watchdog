@@ -21,11 +21,14 @@ Watchdog: 우리 스택 바깥에서 카나리 데이터로 파이프라인이 �
 
 1. `traceparent`(`00-<32hex>-<16hex>-01`) + `tracestate: monimon=canary` 를 붙여 쇼핑몰 주문 API 에 가짜 주문 1건
 2. 바로 `GET /api/v1/internal/canary/freshness?service_name=shop-order` (`X-Internal-Token`)
-3. `fresh` 가 false 면 전용 Slack 웹훅
-4. `GET /api/v1/internal/self-check` (`X-Internal-Token`, backend #226 · #267) — PG 두드림 · Detector · Collector · Notifier 낡음 게이지 · 발송 큐 적체. `ok` 가 false 인 항목마다 Slack 한 줄 (한 메시지)
-5. 무엇으로 끝났든 Healthchecks.io 핑
+3. `fresh` 가 false 면 「카나리 끊김」
+4. `GET /api/v1/internal/self-check` (`X-Internal-Token`, backend #226 · #267) — PG 두드림 · Detector · Collector · Notifier 낡음 게이지 · 발송 큐 적체. `ok` 가 false 인 항목마다 문제 하나
+5. 지난 주기 결과(DynamoDB, 로컬은 파일)와 비교해 **바뀐 항목만** 전용 Slack 웹훅으로. 문제가 생기면 `[PROBLEM][심각도] 이름 — 값 · 뜻 (감지 시각)` 한 번, 풀리면 `[RECOVERED] 이름 — 복구 (감지, 복구, 걸린 시간)` 한 번. 같은 상태가 이어지는 동안은 조용하다 (#26)
+6. 무엇으로 끝났든 Healthchecks.io 핑
 
 **자기 점검은 카나리와 따로 본다.** 카나리는 "신호가 끝까지 흐르나", 자기 점검은 "PG · Detector · Collector · Notifier 가 멈췄나, 경보가 Slack 으로 나가나" 다. backend #208 ⑥ 실측에서 PG 를 멈추자 Detector · Notifier 가 PG 에 막혀 경보가 0건이었고, probe · 카나리도 PG 를 안 봐서 밖에서 보는 눈이 Watchdog 뿐이었다. Notifier 는 둘로 본다 (backend #267) : 게이지는 "큐 읽기가 멈췄나"(죽음 · PG 막힘), 발송 큐 적체는 "읽는데 안 나가나"(웹훅 틀림 · 5xx · 서킷 OPEN) — 게이지만으로는 뒤의 것을 못 잡는다. 응답에 없는 항목은 건너뛴다. 결과의 `self_check` 는 `OK` · `PROBLEM` · `UNREACHABLE`.
+
+**기억한다 (#26).** Lambda 는 실행마다 백지라 지난 주기 결과를 DynamoDB 표 하나(항목 하나)에 둔다. 항목 아홉(카나리 주문 실패 · 카나리 끊김 · 신선도 조회 실패 · 자기 점검 조회 실패 · PostgreSQL · Detector · Collector · Notifier · 발송 적체)마다 「열린 문제」를 감지 시각과 함께 기억하고, 이번 주기와 비교해 새로 열린 것은 `[PROBLEM]`, 닫힌 것은 `[RECOVERED]` 로 한 번씩만 알린다. 조회가 터져 상태를 알 수 없었던 항목은 지난 상태를 그대로 둔다(복구로 치지 않는다). 저장소가 없거나 못 읽으면 **기억 없이 돌아 현재 문제를 전부 다시 알린다** — 조용해지는 쪽으로 실패하지 않게. 심각도는 Collector 비율 갱신만 WARNING, 나머지는 CRITICAL.
 
 **기다리지 않는다.** 2번에서 보이는 것은 방금 쏜 카나리가 아니라 직전 주기(60초 전)에 쏜 것이다. 내 것이 도착할 때까지 기다리면 Lambda 가 30~60초를 붙잡고 있어야 해서 1분 주기에 상주 서버와 다를 게 없어진다.
 
@@ -54,6 +57,8 @@ PYTHONPATH=src python -c 'from handler import Config, run; print(run(Config.from
 | `PING_URL` | Healthchecks.io 핑 주소 (Dead Man's Switch) |
 | `MONIMO_INTERNAL_TOKEN` | 내부 문 출입증. API server 의 같은 이름 값과 맞춘다 |
 | `SLACK_WEBHOOK` | Watchdog 전용 슬랙 웹훅 (관제 스택과 별도 채널) |
+| `STATE_TABLE` | 지난 주기 결과를 기억할 DynamoDB 표 (#26). 운영은 Terraform 이 넣는다 |
+| `STATE_FILE` | 같은 역할의 로컬 파일. 둘 다 없으면 기억 없이 돌아 매 주기 현재 문제를 다시 알린다 |
 
 운영(Lambda)에서는 `infra/` 의 Terraform 이 같은 이름으로 넣는다.
 
@@ -83,6 +88,7 @@ Terraform 에 기본값을 두지 않았다. 아래가 정해져야 `terraform p
 | `terraform.tfvars` 또는 `TF_VAR_*` | `monimo_internal_token`(API server 와 같은 값) · `slack_webhook` · `ping_url` |
 | 레포 Secret `AWS_DEPLOY_ROLE_ARN` | GitHub OIDC 를 신뢰하는 배포 역할 |
 | 레포 Variable `AWS_REGION` · `LAMBDA_FUNCTION_NAME` | `terraform output` 으로 나온다. **이 둘이 비어 있으면 `deploy.yml` 이 통째로 건너뛴다** |
+| (Terraform 이 만든다) | DynamoDB 표 `monimo-watchdog-state` 와 Lambda 의 GetItem · PutItem 권한 (#26). 온디맨드, 1분에 읽기 1 · 쓰기 1 이라 월 센트 단위 |
 
 ## 관련 문서
 

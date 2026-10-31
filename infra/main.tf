@@ -22,10 +22,36 @@ resource "aws_iam_role" "lambda" {
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
-# Watchdog 은 AWS 자원을 읽지 않는다. 로그 쓰기 말고는 권한이 없다
 resource "aws_iam_role_policy_attachment" "lambda_logs" {
   role       = aws_iam_role.lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# 지난 주기 결과를 기억하는 표 (#26). 항목 하나(pk = "watchdog")에 JSON 한 칸. 1분에 읽기 1 · 쓰기 1 이라
+# 온디맨드로 두어도 월 센트 단위다. 표가 없어지면 Watchdog 은 기억 없이 돌아 매 주기 현재 문제를 다시 알린다
+resource "aws_dynamodb_table" "state" {
+  name         = "${var.name_prefix}-state"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+}
+
+# Lambda 가 닿는 AWS 자원은 이 표 하나뿐이다. 로그 쓰기 말고는 다른 권한이 없다
+data "aws_iam_policy_document" "lambda_state" {
+  statement {
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+    resources = [aws_dynamodb_table.state.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_state" {
+  name   = "${var.name_prefix}-state"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.lambda_state.json
 }
 
 # Lambda 가 알아서 만들게 두면 보관 기간이 무기한이 된다
@@ -52,11 +78,13 @@ resource "aws_lambda_function" "watchdog" {
       MONIMO_INTERNAL_TOKEN = var.monimo_internal_token
       SLACK_WEBHOOK         = var.slack_webhook
       PING_URL              = var.ping_url
+      STATE_TABLE           = aws_dynamodb_table.state.name
     }
   }
 
   depends_on = [
     aws_iam_role_policy_attachment.lambda_logs,
+    aws_iam_role_policy.lambda_state,
     aws_cloudwatch_log_group.lambda,
   ]
 }
